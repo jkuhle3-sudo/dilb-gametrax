@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DILB GameTrax</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+html, body { overflow-x: hidden; }
+
+.logo { text-align:center; margin-bottom:10px; }
+.logo img { max-width:200px; height:auto; }
+
+label { display:block; margin-bottom:10px; }
+input, select, button {
+  padding:8px;
+  margin:4px 0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+
+table {
+  border-collapse:collapse;
+  width:100%;
+  table-layout:fixed;
+  margin-top:10px;
+}
+
+table, th, td {
+  border:1px solid #ccc;
+  text-align:center;
+  padding:6px;
+}
+
+#pitchTable td div {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  flex-wrap:wrap;
+}
+
+.remaining {
+  font-weight:bold;
+  color:green;
+}
+
+#signatureSection {
+  display:none;
+  margin-top:20px;
+}
+
+canvas {
+  border:1px solid #000;
+  background:#fff;
+  touch-action:none;
+}
+
+@media (max-width:600px){
+  body{margin:10px;}
+  table{font-size:12px;}
+}
+</style>
+</head>
+
+<body>
+
+<div class="logo">
+  <img src="Logo.png" alt="DILB GameTrax Logo">
+</div>
+
+<h1 style="text-align:center;">DILB GameTrax</h1>
+
+<label>Home Team <input id="teamHome"></label>
+<label>Away Team <input id="teamAway"></label>
+
+<label>Age Division
+<select id="ageDivision">
+  <option>A League</option>
+  <option>B League</option>
+  <option>C League</option>
+  <option>D League</option>
+</select>
+</label>
+
+<label>Plate Umpire <input id="plateUmpire"></label>
+<label>Field Umpire <input id="fieldUmpire"></label>
+
+<h2>Inning Scores</h2>
+<table id="inningTable">
+<tr><th>Inning</th><th>Home</th><th>Away</th></tr>
+<tr>
+<td>1</td>
+<td><input class="homeScore" type="number" value="0"></td>
+<td><input class="awayScore" type="number" value="0"></td>
+</tr>
+</table>
+
+<button id="addInningBtn">Add Inning</button>
+
+<h2>Pitch Counts</h2>
+<table id="pitchTable">
+<tr>
+  <th>Team</th>
+  <th>Pitcher</th>
+  <th>Pitches</th>
+</tr>
+</table>
+
+<button id="addHomePitcherBtn">Add Home Pitcher</button>
+<button id="addAwayPitcherBtn">Add Away Pitcher</button>
+
+<br><br>
+<button id="finalizeBtn">Finalize Game</button>
+
+<div id="summary"></div>
+
+<div id="signatureSection">
+<h2>Coach Signatures</h2>
+
+<p><b>Home Coach</b></p>
+<canvas id="homeSig" width="300" height="150"></canvas>
+
+<p><b>Away Coach</b></p>
+<canvas id="awaySig" width="300" height="150"></canvas>
+
+<br><br>
+<button id="sendResultsBtn">Send Email</button>
+</div>
+
+<script>
+emailjs.init("T8mMk-_uABG69brby");
+
+let gameFinalized = false;
+let emailSent = false;
+
+const leagueLimits = {
+  "A League": 95,
+  "B League": 85,
+  "C League": 75
+};
+
+// ✅ NEW: toggle pitching section for D League
+const pitchingSectionElements = [
+  document.querySelector("h2:nth-of-type(2)"),
+  document.getElementById("pitchTable"),
+  document.getElementById("addHomePitcherBtn"),
+  document.getElementById("addAwayPitcherBtn")
+];
+
+function togglePitchingSection(){
+  const isDLeague = ageDivision.value === "D League";
+  pitchingSectionElements.forEach(el => {
+    if(el) el.style.display = isDLeague ? "none" : "";
+  });
+}
+
+ageDivision.onchange = togglePitchingSection;
+
+function setupCanvas(canvas){
+  const ctx = canvas.getContext("2d");
+  let drawing = false;
+
+  function pos(e){
+    const r = canvas.getBoundingClientRect();
+    return {
+      x:(e.touches?e.touches[0].clientX:e.clientX)-r.left,
+      y:(e.touches?e.touches[0].clientY:e.clientY)-r.top
+    };
+  }
+
+  canvas.onmousedown = e => { drawing=true; ctx.beginPath(); ctx.moveTo(pos(e).x,pos(e).y); };
+  canvas.onmousemove = e => { if(drawing){ let p=pos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); } };
+  canvas.onmouseup = () => drawing=false;
+
+  canvas.ontouchstart = e => { e.preventDefault(); drawing=true; let p=pos(e); ctx.beginPath(); ctx.moveTo(p.x,p.y); };
+  canvas.ontouchmove = e => { e.preventDefault(); if(drawing){ let p=pos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); } };
+  canvas.ontouchend = () => drawing=false;
+
+  return ctx;
+}
+
+const homeCanvas = document.getElementById("homeSig");
+const awayCanvas = document.getElementById("awaySig");
+
+setupCanvas(homeCanvas);
+setupCanvas(awayCanvas);
+
+function getImage(canvas){
+  return canvas.toDataURL("image/png");
+}
+
+// ADD INNING
+addInningBtn.onclick = function(){
+  let row = inningTable.insertRow();
+  row.insertCell(0).innerText = inningTable.rows.length - 1;
+  row.insertCell(1).innerHTML = '<input class="homeScore" type="number" value="0">';
+  row.insertCell(2).innerHTML = '<input class="awayScore" type="number" value="0">';
+};
+
+// ADD PITCHER
+function addPitcher(team){
+  let row = pitchTable.insertRow();
+
+  row.insertCell(0).innerText =
+    team === 'home' ? (teamHome.value || "Home") : (teamAway.value || "Away");
+
+  let pitcherInput = document.createElement("input");
+  row.insertCell(1).appendChild(pitcherInput);
+
+  let pitchInput = document.createElement("input");
+  pitchInput.type = "number";
+  pitchInput.value = 0;
+
+  let span = document.createElement("span");
+  span.className = "remaining";
+
+  function update(val){
+    let max = leagueLimits[ageDivision.value];
+    if(isNaN(val)) val = 0;
+    if(val < 0) val = 0;
+    if(val > max) val = max;
+    pitchInput.value = val;
+    span.innerText = " Remaining: " + (max - val);
+  }
+
+  pitchInput.oninput = () => update(+pitchInput.value);
+
+  let addBtn = document.createElement("button");
+  addBtn.innerText = "+";
+  addBtn.onclick = () => update(+pitchInput.value + 1);
+
+  let minusBtn = document.createElement("button");
+  minusBtn.innerText = "-";
+  minusBtn.onclick = () => update(+pitchInput.value - 1);
+
+  span.innerText = " Remaining: " + leagueLimits[ageDivision.value];
+
+  let cell = row.insertCell(2);
+  let wrap = document.createElement("div");
+  wrap.append(addBtn, pitchInput, minusBtn, span);
+  cell.appendChild(wrap);
+}
+
+addHomePitcherBtn.onclick = () => addPitcher('home');
+addAwayPitcherBtn.onclick = () => addPitcher('away');
+
+// FINALIZE
+finalizeBtn.onclick = function(){
+
+  let h = [...document.querySelectorAll(".homeScore")].map(i=>+i.value||0);
+  let a = [...document.querySelectorAll(".awayScore")].map(i=>+i.value||0);
+
+  let homeTotal = h.reduce((x,y)=>x+y,0);
+  let awayTotal = a.reduce((x,y)=>x+y,0);
+
+  let inningText = "";
+  h.forEach((v,i)=>{
+    inningText += `Inning ${i+1}: ${teamHome.value} ${v} - ${teamAway.value} ${a[i]}\n`;
+  });
+
+  let pitchText = "";
+  [...pitchTable.rows].slice(1).forEach(row=>{
+    let team = row.cells[0].innerText;
+    let pitcher = row.cells[1].querySelector("input").value || "Unnamed";
+    let pitches = row.cells[2].querySelector("input").value || 0;
+    pitchText += `${team} - ${pitcher}: ${pitches}\n`;
+  });
+
+  summary.innerHTML = `
+    <h3>Game Summary</h3>
+    <pre>${inningText}</pre>
+  `;
+
+  signatureSection.style.display = "block";
+  gameFinalized = true;
+};
+
+// SEND EMAIL
+sendResultsBtn.onclick = function(){
+
+  if(!gameFinalized) return alert("Finalize first");
+  if(emailSent) return alert("Already sent");
+
+  let h = [...document.querySelectorAll(".homeScore")].map(i=>+i.value||0);
+  let a = [...document.querySelectorAll(".awayScore")].map(i=>+i.value||0);
+
+  let homeTotal = h.reduce((x,y)=>x+y,0);
+  let awayTotal = a.reduce((x,y)=>x+y,0);
+
+  let inningText = "";
+  h.forEach((v,i)=>{
+    inningText += `Inning ${i+1}: ${teamHome.value} ${v} - ${teamAway.value} ${a[i]}\n`;
+  });
+
+  let pitchText = "";
+  [...pitchTable.rows].slice(1).forEach(row=>{
+    let team = row.cells[0].innerText;
+    let pitcher = row.cells[1].querySelector("input").value || "Unnamed";
+    let pitches = row.cells[2].querySelector("input").value || 0;
+    pitchText += `${team} - ${pitcher}: ${pitches}\n`;
+  });
+
+  const payload = {
+    team_home: teamHome.value,
+    team_away: teamAway.value,
+    league: ageDivision.value,
+    final_score: `${teamHome.value} ${homeTotal} - ${awayTotal} ${teamAway.value}`,
+    inning_scores: inningText,
+    pitch_counts: pitchText,
+    plate_umpire: plateUmpire.value,
+    field_umpire: fieldUmpire.value,
+    home_signature: getImage(homeCanvas),
+    away_signature: getImage(awayCanvas)
+  };
+
+  emailjs.send("service_rambqor","template_wir2yib",payload)
+    .then(()=>{
+      alert("Email sent!");
+      emailSent = true;
+    })
+    .catch(err=>{
+      console.error(err);
+      alert("Email failed");
+    });
+};
+
+// ✅ ensure correct state on load
+togglePitchingSection();
+
+</script>
+
+</body>
+</html>
